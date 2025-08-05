@@ -1,8 +1,26 @@
 #!/bin/bash
 
+echo "----------------------------"
+echo " TikTok Clone Setup Script "
+echo "----------------------------"
+echo
+echo "Before starting:"
+echo "- Make sure you have a domain and its A record points to this server."
+echo "- Example: videos.yourdomain.com --> [This VPS IP]"
+echo
+
+# Ask for hostname (domain) and email
+read -p "Enter your domain name (without https://): " MYDOMAIN
+read -p "Enter your email for SSL (Let’s Encrypt): " MYEMAIL
+
+echo
+echo "Using domain: $MYDOMAIN"
+echo "Using email: $MYEMAIL"
+echo
+
 # --- 1. Install dependencies ---
 sudo apt update
-sudo apt install -y apache2 php php-mysql mysql-server ffmpeg unzip
+sudo apt install -y apache2 php php-mysql mysql-server ffmpeg unzip certbot python3-certbot-apache
 
 # --- 2. Secure MySQL and create database ---
 DBPASS="tiktokclonepass"
@@ -389,7 +407,37 @@ EOP
 # --- 8. Set Permissions ---
 sudo chown -R www-data:www-data /var/www/html/videos
 
-echo "====================================="
-echo " TikTok-Clone setup completed! "
-echo " Visit: http://YOUR_VPS_IP/admin"
-echo "====================================="
+# --- 9. Configure Apache for your domain and SSL ---
+
+# Backup config just in case
+sudo cp /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/000-default.conf.bak
+
+# Set ServerName and DocumentRoot for your domain
+sudo bash -c "cat > /etc/apache2/sites-available/000-default.conf" <<EOF
+<VirtualHost *:80>
+    ServerName $MYDOMAIN
+    DocumentRoot /var/www/html
+    <Directory /var/www/html>
+        AllowOverride All
+    </Directory>
+    ErrorLog \${APACHE_LOG_DIR}/error.log
+    CustomLog \${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
+EOF
+
+sudo systemctl reload apache2
+
+# --- 10. Enable SSL with Certbot ---
+
+sudo certbot --apache -d $MYDOMAIN --non-interactive --agree-tos -m $MYEMAIL
+
+# --- 11. Force HTTP->HTTPS redirect ---
+sudo sed -i "/<\/VirtualHost>/i\
+RewriteEngine On\nRewriteCond %{HTTPS} off\nRewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]" /etc/apache2/sites-available/000-default.conf
+
+sudo systemctl reload apache2
+
+echo "=============================================="
+echo " TikTok-Clone setup completed with SSL! "
+echo " Visit: https://$MYDOMAIN/admin"
+echo "=============================================="
